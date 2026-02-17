@@ -26,7 +26,7 @@ func usage() -> Never {
       calendar  list | today | events [calendar] [days] | search <query> [calendar] [days]
                 create <calendar> <title> <start> <end> [description]
                 details <calendar> <title> | delete <calendar> <title>
-      contacts  search <query> | get <name> | list
+      contacts  search <query> | get <name> | list | delete <name>
                 create <name> [email] [phone] [organization] [birthday]
     """
     FileHandle.standardError.write(text.data(using: .utf8)!)
@@ -371,6 +371,30 @@ struct ContactsService {
         jsonOutput(["message": "Contact created: \(name)"])
     }
 
+    func delete(name: String) {
+        let predicate = CNContact.predicateForContacts(matchingName: name)
+        let contacts: [CNContact]
+        do {
+            contacts = try store.unifiedContacts(matching: predicate, keysToFetch: Self.fetchKeys)
+        } catch {
+            errorOutput("Failed to find contact: \(error.localizedDescription)")
+        }
+
+        guard let contact = contacts.first else {
+            errorOutput("Contact not found: \(name)")
+        }
+
+        let mutable = contact.mutableCopy() as! CNMutableContact
+        let saveRequest = CNSaveRequest()
+        saveRequest.delete(mutable)
+        do {
+            try store.execute(saveRequest)
+        } catch {
+            errorOutput("Failed to delete contact: \(error.localizedDescription)")
+        }
+        jsonOutput(["message": "Contact deleted: \(name)"])
+    }
+
     // MARK: Helpers
 
     private func fullName(_ contact: CNContact) -> String {
@@ -474,6 +498,8 @@ case "contacts":
         guard remaining.count >= 1 else { errorOutput("Usage: apple-services contacts get <name>") }
     case "create":
         guard remaining.count >= 1 else { errorOutput("Usage: apple-services contacts create <name> [email] [phone] [organization] [birthday]") }
+    case "delete":
+        guard remaining.count >= 1 else { errorOutput("Usage: apple-services contacts delete <name>") }
     default:
         errorOutput("Unknown contacts action: \(action)")
     }
@@ -494,6 +520,8 @@ case "contacts":
         let org = remaining.count >= 4 ? remaining[3] : nil
         let birthday = remaining.count >= 5 ? remaining[4] : nil
         contacts.create(name: remaining[0], email: email, phone: phone, organization: org, birthday: birthday)
+    case "delete":
+        contacts.delete(name: remaining[0])
     default:
         break // already handled above
     }

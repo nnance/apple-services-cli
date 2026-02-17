@@ -45,6 +45,9 @@ apple-services contacts list
 
 # Create a contact (name required; rest optional)
 apple-services contacts create <name> [email] [phone] [organization] [birthday]
+
+# Delete a contact by name
+apple-services contacts delete <name>
 ```
 
 ## JSON Output Format
