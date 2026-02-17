@@ -1,4 +1,4 @@
-# apple-services
+# apple-services-cli
 
 Fast native macOS CLI for Apple Calendar and Contacts access. Replaces slow `osascript`-based shell scripts with direct EventKit and Contacts.framework integration.
 
@@ -73,18 +73,15 @@ apple-services contacts create <name> [email] [phone] [organization] [birthday]
 
 ```bash
 swift build -c release
-codesign --force --sign - .build/release/apple-services
-cp .build/release/apple-services /usr/local/bin/apple-services
+codesign --force --sign - --entitlements entitlements.plist .build/release/apple-services
+sudo cp .build/release/apple-services /usr/local/bin/apple-services
 ```
+
+The binary must be codesigned with `entitlements.plist` which declares calendar and contacts access entitlements. An `Info.plist` with the bundle identifier `com.nicknance.apple-services` is embedded via a linker flag in `Package.swift`.
 
 ## TCC Permissions
 
-The binary requires macOS TCC (Transparency, Consent, and Control) grants:
-
-- **Calendar**: Full Access to Calendars (EventKit) — prompted on first `calendar` subcommand
-- **Contacts**: Contacts access (Contacts.framework) — prompted on first `contacts` subcommand
-
-If running from Terminal.app or another host, the **host app** must also have the relevant TCC permissions. Grant these in System Settings > Privacy & Security.
+The binary requires macOS TCC (Transparency, Consent, and Control) grants for Calendar (Full Access) and Contacts. TCC attributes permissions to the **host terminal app** (e.g., Terminal.app, Warp, iTerm), not the binary itself. The terminal app must have Calendar and Contacts access granted in **System Settings > Privacy & Security**. On first run from a new terminal app, macOS should prompt for access.
 
 ## Architecture
 
