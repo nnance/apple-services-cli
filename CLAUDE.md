@@ -12,14 +12,26 @@ Native macOS CLI (Swift) that provides fast access to Apple Calendar and Contact
 swift build                    # Debug build
 swift build -c release         # Release build
 
-# Install (release)
-codesign --force --sign - .build/release/apple-services
-cp .build/release/apple-services /usr/local/bin/apple-services
-
 # Run (debug)
 .build/debug/apple-services calendar list
 .build/debug/apple-services contacts search "Jane"
 ```
+
+## Install
+
+The release binary must be codesigned with `entitlements.plist` (calendar + contacts entitlements) before installing. The binary also has a bundle identifier (`com.nicknance.apple-services`) embedded via Info.plist through a linker flag in Package.swift.
+
+```bash
+swift build -c release
+codesign --force --sign - --entitlements entitlements.plist .build/release/apple-services
+sudo cp .build/release/apple-services /usr/local/bin/apple-services
+```
+
+## TCC Permissions
+
+The binary requires macOS TCC grants for Calendar (Full Access) and Contacts. TCC attributes permissions to the **host terminal app** (e.g., Terminal.app, Warp), not the binary itself. The terminal app must have Calendar and Contacts access granted in **System Settings > Privacy & Security**. On first run from a new terminal app, macOS should prompt for access.
+
+## Testing
 
 No test suite or linter is configured. Test manually by running subcommands against real Calendar/Contacts data.
 
@@ -44,10 +56,6 @@ No test suite or linter is configured. Test manually by running subcommands agai
 - Date input format: `"MM/DD/YYYY HH:MM:SS"`
 - Date output format: ISO 8601
 - Default calendar: `$APPLE_CALENDAR_NAME` env var, fallback `"Calendar"`
-
-### TCC Permissions
-
-The binary requires macOS TCC grants for Calendar (Full Access) and Contacts. The host terminal app must also have these permissions (System Settings > Privacy & Security).
 
 ## Implementation Reference
 
