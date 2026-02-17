@@ -1,5 +1,6 @@
 import Foundation
 import EventKit
+import Contacts
 
 // MARK: - JSON Output Helpers
 
@@ -238,6 +239,170 @@ extension EKSourceType: @retroactive CustomStringConvertible {
     }
 }
 
+// MARK: - Contacts Service
+
+struct ContactsService {
+    let store = CNContactStore()
+
+    static let fetchKeys: [CNKeyDescriptor] = [
+        CNContactGivenNameKey as CNKeyDescriptor,
+        CNContactFamilyNameKey as CNKeyDescriptor,
+        CNContactEmailAddressesKey as CNKeyDescriptor,
+        CNContactPhoneNumbersKey as CNKeyDescriptor,
+        CNContactOrganizationNameKey as CNKeyDescriptor,
+        CNContactBirthdayKey as CNKeyDescriptor,
+        CNContactIdentifierKey as CNKeyDescriptor,
+    ]
+
+    func requestAccess() {
+        let semaphore = DispatchSemaphore(value: 0)
+        var granted = false
+        store.requestAccess(for: .contacts) { ok, _ in
+            granted = ok
+            semaphore.signal()
+        }
+        semaphore.wait()
+        if !granted {
+            errorOutput("Contacts access denied. Grant permission in System Settings > Privacy & Security.")
+        }
+    }
+
+    // MARK: Actions
+
+    func search(query: String) {
+        let predicate = CNContact.predicateForContacts(matchingName: query)
+        let nameMatches: [CNContact]
+        do {
+            nameMatches = try store.unifiedContacts(matching: predicate, keysToFetch: Self.fetchKeys)
+        } catch {
+            errorOutput("Failed to search contacts: \(error.localizedDescription)")
+        }
+
+        // Also search by organization
+        let lowerQuery = query.lowercased()
+        var allContacts: [CNContact] = []
+        let fetchRequest = CNContactFetchRequest(keysToFetch: Self.fetchKeys)
+        do {
+            try store.enumerateContacts(with: fetchRequest) { contact, _ in
+                allContacts.append(contact)
+            }
+        } catch {
+            errorOutput("Failed to enumerate contacts: \(error.localizedDescription)")
+        }
+
+        let nameIds = Set(nameMatches.map { $0.identifier })
+        let orgMatches = allContacts.filter {
+            !nameIds.contains($0.identifier) &&
+            $0.organizationName.lowercased().contains(lowerQuery)
+        }
+
+        let results = (nameMatches + orgMatches).map { contactListDict($0) }
+        jsonOutput(results)
+    }
+
+    func get(name: String) {
+        let predicate = CNContact.predicateForContacts(matchingName: name)
+        let contacts: [CNContact]
+        do {
+            contacts = try store.unifiedContacts(matching: predicate, keysToFetch: Self.fetchKeys)
+        } catch {
+            errorOutput("Failed to get contact: \(error.localizedDescription)")
+        }
+
+        guard let contact = contacts.first else {
+            errorOutput("Contact not found: \(name)")
+        }
+
+        jsonOutput(contactDetailDict(contact))
+    }
+
+    func list() {
+        var results: [[String: Any]] = []
+        let fetchRequest = CNContactFetchRequest(keysToFetch: Self.fetchKeys)
+        fetchRequest.sortOrder = .familyName
+        do {
+            try store.enumerateContacts(with: fetchRequest) { contact, _ in
+                results.append(contactListDict(contact))
+            }
+        } catch {
+            errorOutput("Failed to list contacts: \(error.localizedDescription)")
+        }
+        jsonOutput(results)
+    }
+
+    func create(name: String, email: String?, phone: String?, organization: String?, birthday: String?) {
+        let contact = CNMutableContact()
+
+        let parts = name.split(separator: " ", maxSplits: 1)
+        contact.givenName = String(parts[0])
+        if parts.count > 1 {
+            contact.familyName = String(parts[1])
+        }
+
+        if let email = email, !email.isEmpty {
+            contact.emailAddresses = [CNLabeledValue(label: CNLabelHome, value: email as NSString)]
+        }
+        if let phone = phone, !phone.isEmpty {
+            contact.phoneNumbers = [CNLabeledValue(label: CNLabelPhoneNumberMain, value: CNPhoneNumber(stringValue: phone))]
+        }
+        if let org = organization, !org.isEmpty {
+            contact.organizationName = org
+        }
+        if let birthday = birthday, !birthday.isEmpty {
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            // Try common formats
+            for fmt in ["MMMM d, yyyy", "yyyy-MM-dd", "MM/dd/yyyy"] {
+                formatter.dateFormat = fmt
+                if let date = formatter.date(from: birthday) {
+                    let components = Foundation.Calendar.current.dateComponents([.year, .month, .day], from: date)
+                    contact.birthday = components
+                    break
+                }
+            }
+        }
+
+        let saveRequest = CNSaveRequest()
+        saveRequest.add(contact, toContainerWithIdentifier: nil)
+        do {
+            try store.execute(saveRequest)
+        } catch {
+            errorOutput("Failed to create contact: \(error.localizedDescription)")
+        }
+        jsonOutput(["message": "Contact created: \(name)"])
+    }
+
+    // MARK: Helpers
+
+    private func fullName(_ contact: CNContact) -> String {
+        [contact.givenName, contact.familyName]
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+    }
+
+    private func contactListDict(_ contact: CNContact) -> [String: Any] {
+        [
+            "name": fullName(contact),
+            "email": contact.emailAddresses.map { $0.value as String },
+            "phone": contact.phoneNumbers.map { $0.value.stringValue },
+            "organization": contact.organizationName,
+        ]
+    }
+
+    private func contactDetailDict(_ contact: CNContact) -> [String: Any] {
+        var dict: [String: Any] = contactListDict(contact)
+        if let bday = contact.birthday, let date = Foundation.Calendar.current.date(from: bday) {
+            let formatter = DateFormatter()
+            formatter.dateFormat = "yyyy-MM-dd"
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            dict["birthday"] = formatter.string(from: date)
+        } else {
+            dict["birthday"] = ""
+        }
+        return dict
+    }
+}
+
 // MARK: - Argument Parsing & Dispatch
 
 let args = Array(CommandLine.arguments.dropFirst())
@@ -299,20 +464,38 @@ case "calendar":
     }
 
 case "contacts":
+    // Validate arguments before requesting TCC access
     switch action {
+    case "list":
+        break
     case "search":
         guard remaining.count >= 1 else { errorOutput("Usage: apple-services contacts search <query>") }
-        errorOutput("Contacts search not yet implemented")
     case "get":
         guard remaining.count >= 1 else { errorOutput("Usage: apple-services contacts get <name>") }
-        errorOutput("Contacts get not yet implemented")
-    case "list":
-        errorOutput("Contacts list not yet implemented")
     case "create":
         guard remaining.count >= 1 else { errorOutput("Usage: apple-services contacts create <name> [email] [phone] [organization] [birthday]") }
-        errorOutput("Contacts create not yet implemented")
     default:
         errorOutput("Unknown contacts action: \(action)")
+    }
+
+    let contacts = ContactsService()
+    contacts.requestAccess()
+
+    switch action {
+    case "search":
+        contacts.search(query: remaining[0])
+    case "get":
+        contacts.get(name: remaining[0])
+    case "list":
+        contacts.list()
+    case "create":
+        let email = remaining.count >= 2 ? remaining[1] : nil
+        let phone = remaining.count >= 3 ? remaining[2] : nil
+        let org = remaining.count >= 4 ? remaining[3] : nil
+        let birthday = remaining.count >= 5 ? remaining[4] : nil
+        contacts.create(name: remaining[0], email: email, phone: phone, organization: org, birthday: birthday)
+    default:
+        break // already handled above
     }
 
 default:
