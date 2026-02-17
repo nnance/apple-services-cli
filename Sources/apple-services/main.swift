@@ -14,8 +14,7 @@ func jsonOutput(_ value: Any) {
 
 func errorOutput(_ message: String) -> Never {
     let data = try! JSONSerialization.data(withJSONObject: ["error": message])
-    FileHandle.standardError.write(data)
-    FileHandle.standardError.write("\n".data(using: .utf8)!)
+    print(String(data: data, encoding: .utf8)!)
     exit(1)
 }
 
@@ -382,6 +381,7 @@ struct ContactsService {
 
     private func contactListDict(_ contact: CNContact) -> [String: Any] {
         [
+            "id": contact.identifier,
             "name": fullName(contact),
             "email": contact.emailAddresses.map { $0.value as String },
             "phone": contact.phoneNumbers.map { $0.value.stringValue },
