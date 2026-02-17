@@ -7,7 +7,16 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "apple-services",
-            path: "Sources/apple-services"
+            path: "Sources/apple-services",
+            exclude: ["Info.plist"],
+            linkerSettings: [
+                .unsafeFlags([
+                    "-Xlinker", "-sectcreate",
+                    "-Xlinker", "__TEXT",
+                    "-Xlinker", "__info_plist",
+                    "-Xlinker", "Sources/apple-services/Info.plist"
+                ])
+            ]
         )
     ]
 )
